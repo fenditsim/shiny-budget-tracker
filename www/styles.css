@@ -1,0 +1,343 @@
+/* Budget Tracker App Styles */
+
+/* Progress bar styles */
+.progress {
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+body.dark-mode .progress {
+  background-color: #333333;
+}
+
+.progress-bar-danger {
+  background-color: #dc3545;
+}
+
+/* Progress bar animation */
+@keyframes progress-bar-stripes {
+  from { background-position: 40px 0; }
+  to { background-position: 0 0; }
+}
+
+.progress-bar.active {
+  animation: progress-bar-stripes 2s linear infinite;
+}
+
+body { font-family: Arial, sans-serif; }
+.container-fluid { max-width: 1200px; margin: 0 auto; }
+.nav-tabs { margin-bottom: 20px; }
+.card { 
+  border: 1px solid #ddd; 
+  border-radius: 4px; 
+  padding: 15px; 
+  margin-bottom: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.btn-block { width: 100%; }
+.navbar { 
+  background-color: #007bff; 
+  color: white; 
+  padding: 15px; 
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.navbar h3 { margin: 0; color: white; }
+.nav-buttons { display: flex; }
+.mr-2 { margin-right: 10px; }
+.welcome-message { margin-bottom: 20px; }
+
+/* Make form inputs consistent width */
+.form-group {
+  max-width: 100%;
+}
+
+/* Responsive adjustments */
+@media (max-width: 576px) {
+  .form-control {
+    width: 100% !important;
+  }
+}
+
+/* Settings page takes full screen */
+#settings-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: white;
+  z-index: 1000;
+  overflow-y: auto;
+}
+
+/* Make settings content consistent width */
+#settings-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 15px;
+}
+
+/* Make settings card same width as other cards */
+#settings-content .card {
+  max-width: none;
+  width: 100%;
+}
+
+/* Add padding to settings tabs */
+.p-3 {
+  padding: 15px;
+}
+
+/* Center login and register forms */
+#login-panel, #register-panel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding-top: 40px;
+}
+
+#login-panel .card, #register-panel .card {
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Make all tabsets consistent in appearance */
+.nav-tabs {
+  width: 100%;
+  display: flex;
+}
+
+.nav-tabs .nav-item {
+  flex: 1;
+  text-align: center;
+}
+
+.nav-tabs .nav-link {
+  width: 100%;
+  border-radius: 0;
+  border-top-left-radius: 0.25rem;
+  border-top-right-radius: 0.25rem;
+}
+
+/* Ensure settings tabs match main tabs in appearance */
+#settings_tabs .nav-tabs {
+  margin-bottom: 20px;
+  border-bottom: 1px solid #dee2e6;
+}
+
+#settings_tabs .tab-content {
+  width: 100%;
+}
+
+#settings_tabs .tab-pane {
+  width: 100%;
+}
+
+/* Export options container */
+.export-container {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 15px;
+  align-items: center;
+}
+
+.export-format-select {
+  margin-right: 10px;
+  min-width: 180px; /* Ensure enough width for dropdown text */
+}
+
+/* Make sure dropdown has enough width */
+.export-format-select .selectize-input,
+.export-format-select .form-control {
+  min-width: 180px;
+  width: 100% !important;
+  padding-right: 25px; /* Make room for dropdown arrow */
+}
+
+/* Danger zone styles */
+.danger-zone {
+  margin-top: 30px;
+  margin-bottom: 20px;
+  padding-top: 20px;
+  border-top: 1px solid #ddd;
+}
+
+.danger-zone h4 {
+  color: #dc3545;
+  margin-bottom: 15px;
+}
+
+/* Dark mode styles */
+body.dark-mode {
+  background-color: #121212;
+  color: #ffffff;
+}
+
+body.dark-mode .card {
+  background-color: #1e1e1e;
+  border-color: #333333;
+}
+
+body.dark-mode .form-control {
+  background-color: #2a2a2a;
+  color: #ffffff;
+  border-color: #333333;
+}
+
+/* Style for dropdown menus in dark mode */
+body.dark-mode select.form-control,
+body.dark-mode .selectize-input,
+body.dark-mode .selectize-dropdown {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  border-color: #333333 !important;
+}
+
+/* Style dropdown options */
+body.dark-mode option {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+/* Dark mode table styles with higher specificity */
+body.dark-mode .table,
+body.dark-mode .table-striped {
+  /* Keep table text black even in dark mode */
+  color: #000000 !important;
+  background-color: #1e1e1e !important;
+}
+
+body.dark-mode .table tr,
+body.dark-mode .table-striped tr {
+  background-color: #1e1e1e !important;
+}
+
+body.dark-mode .table tbody tr,
+body.dark-mode .table-striped tbody tr {
+  background-color: #1e1e1e !important;
+}
+
+body.dark-mode .table-striped tbody tr:nth-of-type(odd) {
+  background-color: #2a2a2a !important;
+}
+
+body.dark-mode .table th,
+body.dark-mode .table td {
+  color: #000000 !important;
+  border-color: #333333 !important;
+}
+
+body.dark-mode .navbar {
+  background-color: #48A860 !important;
+}
+
+body.dark-mode .navbar h3 {
+  color: white !important;
+}
+
+body.dark-mode #settings-panel {
+  background-color: #121212;
+}
+
+body.dark-mode .nav-tabs {
+  border-color: #333333;
+}
+
+body.dark-mode .nav-tabs .nav-link {
+  color: #48A860 !important;
+}
+
+body.dark-mode .nav-tabs .nav-link.active {
+  background-color: #48A860 !important;
+  color: white !important;
+  border-color: #333333 !important;
+}
+
+body.dark-mode .btn-secondary {
+  background-color: #ffffff !important;
+  border-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* Dark mode for danger zone */
+body.dark-mode .danger-zone {
+  border-top: 1px solid #333333;
+}
+
+/* Modal styles */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 2000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+  background-color: #fefefe;
+  margin: 15% auto;
+  padding: 20px;
+  border: 1px solid #888;
+  width: 80%;
+  max-width: 500px;
+}
+
+body.dark-mode .modal-content {
+  background-color: #1e1e1e;
+  border-color: #333333;
+  color: #ffffff;
+}
+
+/* Enhance action buttons in expense list */
+.action-btn {
+  padding: 2px 6px;
+  margin: 0 2px;
+}
+
+
+/* Import Data styles */
+.format-instructions {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.format-instructions pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+body.dark-mode .format-instructions {
+  background-color: #2a2a2a;
+  color: #ffffff;
+}
+
+body.dark-mode .format-instructions pre {
+  background-color: #333333;
+  color: #ffffff;
+}
+
+.upload-preview {
+  margin-top: 20px;
+}
+
+/* Text area styling */
+#expense_text_data {
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body.dark-mode #expense_text_data {
+  background-color: #2a2a2a;
+  color: #ffffff;
+  border-color: #333333;
+}
