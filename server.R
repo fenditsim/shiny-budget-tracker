@@ -1,4 +1,6 @@
 # server.R - Server logic for the Budget Tracker app
+library(echarts4r)
+library(htmlwidgets)
 
 server <- function(input, output, session) {
   # Initialize database connection inside server function
@@ -227,6 +229,13 @@ server <- function(input, output, session) {
       updateNumericInput(
         session,
         "expense_amount",
+        label = paste0("Amount (", app_settings$currency_symbol, ")"),
+        value = input$expense_amount  # Preserve current value
+      )
+      
+      updateNumericInput(
+        session,
+        "income_amount",
         label = paste0("Amount (", app_settings$currency_symbol, ")"),
         value = input$expense_amount  # Preserve current value
       )
@@ -802,72 +811,217 @@ server <- function(input, output, session) {
     )
   })
   
-  # Budget progress output
+  # Budget progress output with speedometer-style gauge
   output$budget_progress <- renderUI({
     req(user_data$is_authenticated)
     
-    # Create direct dependency on the expense tracker counter
+    # Get current spending and limit
+    current_spending <- calculate_current_spending()
+    spending_limit <- user_data$spending_limit
+    
+    # Calculate percentage (capped at 100%)
+    percentage <- min(100, round(current_spending / spending_limit * 100))
+    
+    # Calculate angle for clockwise rotation from 270° to 90°
+    # 0% = 270° (9 o'clock), 50% = 0° (12 o'clock), 100% = 90° (3 o'clock)
+    needle_angle <- as.numeric(270 + (percentage * 180 / 100))
+    
+    # Period text
+    period_text <- get_period_range_text(user_data$limit_period)
+    
+    tagList(
+      tags$style(HTML("
+      .speedometer {
+        position: relative;
+        width: 300px;
+        height: 150px;
+        margin: 0 auto;
+        margin-top: 20px;
+        margin-bottom: 40px;
+      }
+      .gauge-bg {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 300px;
+        height: 150px;
+        border-radius: 150px 150px 0 0;
+        background: linear-gradient(90deg, 
+          #28a745 0%, #28a745 60%, 
+          #ffc107 60%, #ffc107 80%, 
+          #dc3545 80%, #dc3545 100%);
+      }
+      .gauge-white {
+        position: absolute;
+        top: 30px;
+        left: 30px;
+        width: 240px;
+        height: 120px;
+        border-radius: 120px 120px 0 0;
+        background: white;
+      }
+      .needle-container {
+        position: absolute;
+        top: 150px;
+        left: 150px;
+        height: 0;
+        width: 0;
+      }
+      .needle {
+        position: absolute;
+        top: -120px;
+        left: -2px;
+        width: 4px;
+        height: 120px;
+        background: #333;
+        transform-origin: bottom center;
+        transform: rotate(270deg); /* Start at 9 o'clock */
+        transition: transform 1.5s ease-out;
+      }
+      .needle-pivot {
+        position: absolute;
+        top: -8px;
+        left: -8px;
+        width: 16px;
+        height: 16px;
+        background: #333;
+        border-radius: 50%;
+      }
+      /* Add these styles for dark mode */
+      body.dark-mode .needle {
+          background: #ff5555; /* Bright reddish color for dark mode */
+      }
+      
+      body.dark-mode .needle-pivot {
+          background: #ff5555; /* Matching pivot color for dark mode */
+      }
+      .percentage {
+        position: absolute;
+        top: 90px;
+        left: 0;
+        width: 300px;
+        text-align: center;
+        font-size: 28px;
+        font-weight: bold;
+      }
+      .labels {
+        position: absolute;
+        top: 160px;
+        left: 0;
+        width: 300px;
+        display: flex;
+        justify-content: space-between;
+        padding: 0 30px;
+      }
+      .low {
+        color: #28a745;
+        font-weight: bold;
+        font-size: 16px;
+      }
+      .high {
+        color: #dc3545;
+        font-weight: bold;
+        font-size: 16px;
+      }
+      body.dark-mode .gauge-white {
+        background: #1e1e1e;
+      }
+      body.dark-mode .percentage {
+        color: #fff;
+      }
+    ")),
+      
+      div(style = "display: flex; justify-content: space-between; margin-bottom: 5px;",
+          span(sprintf("Period: %s", period_text)),
+          span(sprintf("%s of %s limit", 
+                       format_currency(current_spending, app_settings$currency),
+                       format_currency(spending_limit, app_settings$currency)))
+      ),
+      
+      div(class="speedometer",
+          div(class="gauge-bg"),
+          div(class="gauge-white"),
+          div(class="needle-container",
+              div(id="needle", class="needle"),
+              div(class="needle-pivot")
+          ),
+          div(class="percentage", paste0(percentage, "%")),
+          div(class="labels",
+              div(class="low", "LOW"),
+              div(class="high", "HIGH")
+          )
+      ),
+      
+      # JavaScript to animate the needle
+      tags$script(HTML(paste0("
+      // First reset the needle to the left position (270°)
+      var needle = document.getElementById('needle');
+      if (needle) {
+        needle.style.transition = 'none';
+        needle.style.transform = 'rotate(270deg)'; 
+        
+        // Force a browser reflow
+        void needle.offsetWidth;
+        
+        // Animate to the current percentage (clockwise)
+        setTimeout(function() {
+          needle.style.transition = 'transform 1.5s ease-out';
+          needle.style.transform = 'rotate(", needle_angle, "deg)';
+        }, 300);
+      }
+    ")))
+    )
+  })
+  
+  # Create the cost gauge chart
+  output$cost_gauge <- renderEcharts4r({
+    req(user_data$is_authenticated)
+    
+    # Add dependency on expense tracker
     expense_tracker$update_counter
     
     # Get current spending and limit
     current_spending <- calculate_current_spending()
     spending_limit <- user_data$spending_limit
     
-    # Calculate percentage
+    # Calculate percentage (capped at 100%)
     percentage <- min(100, round(current_spending / spending_limit * 100))
     
-    # Define both color classes and direct color styles
-    bar_color <- if(percentage >= 80) "#dc3545" else if(percentage >= 60) "#ffc107" else "#28a745"
-    bar_class <- if(percentage >= 80) "bg-danger" else if(percentage >= 60) "bg-warning" else "bg-success"
+    # Define color based on percentage
+    gauge_color <- if(percentage >= 80) "#dc3545" else if(percentage >= 60) "#ffc107" else "#28a745"
     
-    # Ensure stripes are visible with both class and direct style
-    has_stripes <- percentage >= 90
-    stripe_style <- if(has_stripes) "
-    background-image: linear-gradient(45deg, 
-      rgba(255, 255, 255, .15) 25%, 
-      transparent 25%, 
-      transparent 50%, 
-      rgba(255, 255, 255, .15) 50%, 
-      rgba(255, 255, 255, .15) 75%, 
-      transparent 75%, 
-      transparent);
-    background-size: 1rem 1rem;
-    animation: progress-bar-stripes 1s linear infinite;
-  " else ""
-    
-    active_class <- if(has_stripes) " progress-bar-striped progress-bar-animated" else ""
-    
-    # Period text
-    period_text <- get_period_range_text(user_data$limit_period)
-    
-    tagList(
-      # Add the keyframe animation definition
-      tags$style(HTML("
-      @keyframes progress-bar-stripes {
-        from { background-position: 1rem 0; }
-        to { background-position: 0 0; }
-      }
-    ")),
-      
-      div(style = "margin-bottom: 10px; display: flex; justify-content: space-between;",
-          span(sprintf("Period: %s", period_text)),
-          span(sprintf("%s of %s limit", 
-                       format_currency(current_spending, app_settings$currency),
-                       format_currency(spending_limit, app_settings$currency)))
-      ),
-      div(class = "progress", style = "height: 25px; background-color: #e9ecef;",
-          div(
-            class = paste("progress-bar", bar_class, active_class), 
-            role = "progressbar",
-            style = sprintf("width: %d%%; background-color: %s; %s", 
-                            percentage, bar_color, stripe_style),
-            `aria-valuenow` = percentage,
-            `aria-valuemin` = 0,
-            `aria-valuemax` = 100,
-            sprintf("%d%%", percentage)
-          )
-      )
+    # Create data frame for the gauge - critical to include a name for the value
+    df <- data.frame(
+      name = "COST", 
+      value = percentage
     )
+    
+    # Create the gauge chart with correct parameters
+    gauge <- df |>
+      e_charts(name) |>
+      e_gauge(value, 
+              min = 0, 
+              max = 100
+      ) |>
+      e_title("Cost Efficiency Meter") |>
+      e_labels(formatter = "{b}: {c}%")
+    
+    # Apply theme based on app settings
+    if(app_settings$theme == "dark") {
+      gauge <- gauge |> e_theme("dark")
+    }
+    
+    return(gauge)
+  })
+  
+  # Animate gauge when switching to the Report tab
+  observeEvent(input$main_tabs, {
+    if(input$main_tabs == "report" && user_data$is_authenticated) {
+      # Force a refresh of the gauge with animation
+      shinyjs::delay(100, {
+        expense_tracker$update_counter <- expense_tracker$update_counter + 1
+      })
+    }
   })
   
   # Modal control for edit expense
@@ -2096,5 +2250,534 @@ server <- function(input, output, session) {
     output$text_preview_ui <- renderUI({})
     shinyjs::hide("import_text_button_container")
     parsed_text_data(NULL)  # Clear stored data
+  })
+  
+  # Add income handler
+  observeEvent(input$add_income_btn, {
+    req(user_data$user_id, input$income_date, input$income_source, 
+        input$income_amount, input$income_category)
+    
+    # Debug output
+    cat("Adding income:", input$income_source, input$income_amount, "\n")
+    
+    # Insert income with error handling
+    tryCatch({
+      # Insert income
+      dbExecute(
+        con,
+        sprintf(
+          "INSERT INTO income (user_id, date, source_name, amount, category) VALUES (%d, '%s', '%s', %.2f, '%s')",
+          user_data$user_id, input$income_date, sql_escape(input$income_source), 
+          input$income_amount, sql_escape(input$income_category)
+        )
+      )
+      
+      # Force a slightly different update counter value
+      new_counter <- expense_tracker$update_counter + 1
+      expense_tracker$update_counter <- new_counter
+      cat("Updated counter to:", new_counter, "\n")
+      
+      # Success message and form reset...
+    }, error = function(e) {
+      cat("Error adding income:", e$message, "\n")
+      shinyalert(title = "Error", text = e$message, type = "error")
+    })
+  })
+  
+  # Create income list UI
+  output$income_list <- renderUI({
+    req(user_data$user_id)
+    
+    # Add explicit dependency on expense tracker to force updates
+    expense_tracker$update_counter
+    
+    # Get income data - use dbSendQuery + dbFetch to avoid caching issues
+    query <- dbSendQuery(
+      con,
+      sprintf(
+        "SELECT id, date, source_name, amount, category FROM income 
+       WHERE user_id = %d
+       ORDER BY date DESC, id DESC 
+       LIMIT 100",
+        user_data$user_id
+      )
+    )
+    income <- dbFetch(query)
+    dbClearResult(query)
+    
+    # Debug output to console
+    cat("Refreshing income list, found", nrow(income), "records\n")
+    
+    if (nrow(income) == 0) {
+      return(div(
+        style = "text-align: center; padding: 20px;",
+        "No income entries found."
+      ))
+    }
+    
+    # Calculate total
+    total <- sum(income$amount)
+    
+    # Create table
+    div(
+      style = "overflow-x: auto;",
+      tags$table(
+        class = "table table-striped",
+        tags$thead(
+          tags$tr(
+            tags$th("Date"),
+            tags$th("Source"),
+            tags$th("Category"),
+            tags$th("Amount"),
+            tags$th("Actions", style = "text-align: center;")
+          )
+        ),
+        tags$tbody(
+          lapply(1:nrow(income), function(i) {
+            inc <- income[i, ]
+            tags$tr(
+              tags$td(format(as.Date(inc$date), "%d %b %Y")),
+              tags$td(inc$source_name),
+              tags$td(inc$category),
+              tags$td(sprintf("%s%.2f", app_settings$currency_symbol, inc$amount), style = "text-align: right;"),
+              tags$td(
+                style = "text-align: center; white-space: nowrap;",
+                # Add edit/delete buttons similar to expenses
+                actionButton(
+                  inputId = paste0("edit_income_", inc$id),
+                  label = NULL,
+                  icon = icon("edit"),
+                  class = "btn-sm btn-primary",
+                  style = "margin-right: 5px;"
+                ),
+                actionButton(
+                  inputId = paste0("delete_income_", inc$id),
+                  label = NULL,
+                  icon = icon("trash"),
+                  class = "btn-sm btn-danger"
+                )
+              )
+            )
+          })
+        ),
+        tags$tfoot(
+          tags$tr(
+            tags$th(colspan = 3, "Total", style = "text-align: right;"),
+            tags$th(sprintf("%s%.2f", app_settings$currency_symbol, total), style = "text-align: right;")
+          )
+        )
+      )
+    )
+  })
+  
+  # Unified save transaction handler
+  observeEvent(input$save_transaction_btn, {
+    req(user_data$user_id, input$transaction_date)
+    
+    # Handle based on transaction type
+    if(input$transaction_type == "expense") {
+      req(input$expense_name, input$expense_amount, input$expense_category)
+      
+      # Escape single quotes
+      safe_item_name <- sql_escape(input$expense_name)
+      safe_category <- sql_escape(input$expense_category)
+      
+      # Insert expense
+      dbExecute(
+        con,
+        sprintf(
+          "INSERT INTO expenses (user_id, date, item_name, amount, category) VALUES (%d, '%s', '%s', %.2f, '%s')",
+          user_data$user_id, input$transaction_date, safe_item_name, 
+          input$expense_amount, safe_category
+        )
+      )
+      
+      # Show success message
+      shinyalert(
+        title = "Expense Added",
+        text = sprintf("Your expense of %s for %s has been added successfully.",
+                       format_currency(input$expense_amount, app_settings$currency), 
+                       input$expense_name),
+        type = "success",
+        timer = 2000,
+        showConfirmButton = FALSE
+      )
+      
+    } else if(input$transaction_type == "income") {
+      req(input$income_source, input$income_amount, input$income_category)
+      
+      # Escape single quotes
+      safe_source_name <- sql_escape(input$income_source)
+      safe_category <- sql_escape(input$income_category)
+      
+      # Insert income
+      dbExecute(
+        con,
+        sprintf(
+          "INSERT INTO income (user_id, date, source_name, amount, category) VALUES (%d, '%s', '%s', %.2f, '%s')",
+          user_data$user_id, input$transaction_date, safe_source_name, 
+          input$income_amount, safe_category
+        )
+      )
+      
+      # Show success message
+      shinyalert(
+        title = "Income Added",
+        text = sprintf("Your income of %s from %s has been added successfully.",
+                       format_currency(input$income_amount, app_settings$currency), 
+                       input$income_source),
+        type = "success",
+        timer = 2000,
+        showConfirmButton = FALSE
+      )
+    }
+    
+    # Increment update counter to trigger UI refresh
+    expense_tracker$update_counter <- expense_tracker$update_counter + 1
+    
+    # Reset form based on transaction type
+    if(input$transaction_type == "expense") {
+      updateTextInput(session, "expense_name", value = "")
+      updateNumericInput(session, "expense_amount", value = 0)
+    } else {
+      updateTextInput(session, "income_source", value = "")
+      updateNumericInput(session, "income_amount", value = 0)
+    }
+  })
+  
+  # Create a simple HTML/CSS financial summary
+  output$financial_summary <- renderUI({
+    req(user_data$is_authenticated)
+    
+    # Add dependency on expense tracker counter
+    expense_tracker$update_counter
+    
+    # Get financial data
+    financial_data <- calculate_net_cash_flow()
+    
+    # Format currency values
+    income_formatted <- format_currency(financial_data$income, app_settings$currency)
+    expenses_formatted <- format_currency(financial_data$expenses, app_settings$currency)
+    net_formatted <- format_currency(financial_data$net, app_settings$currency)
+    
+    # Determine net class
+    net_class <- if(financial_data$net >= 0) "positive-net" else "negative-net"
+    
+    # Inline CSS
+    tags$div(
+      style = "font-family: inherit;",
+      tags$style(HTML("
+      .financial-summary { width: 100%; margin-bottom: 20px; }
+      .financial-card { display: flex; text-align: center; margin-bottom: 15px; }
+      .financial-metric { flex: 1; padding: 15px; border-radius: 8px; margin: 0 5px; }
+      .income-metric { background-color: rgba(40, 167, 69, 0.2); color: #28a745; }
+      .expenses-metric { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
+      .positive-net { background-color: rgba(40, 167, 69, 0.2); color: #28a745; }
+      .negative-net { background-color: rgba(220, 53, 69, 0.2); color: #dc3545; }
+      .financial-value { font-size: 24px; font-weight: bold; margin: 10px 0; }
+      .financial-label { font-size: 14px; text-transform: uppercase; margin: 0; }
+      body.dark-mode .financial-metric { border: 1px solid rgba(255, 255, 255, 0.1); }
+    ")),
+      
+      tags$div(class = "financial-summary",
+               
+               # Income and Expenses row
+               tags$div(class = "financial-card",
+                        # Income metric
+                        tags$div(class = "financial-metric income-metric",
+                                 tags$p(class = "financial-label", "Income"),
+                                 tags$p(class = "financial-value", income_formatted)
+                        ),
+                        
+                        # Expenses metric
+                        tags$div(class = "financial-metric expenses-metric",
+                                 tags$p(class = "financial-label", "Expenses"),
+                                 tags$p(class = "financial-value", expenses_formatted)
+                        )
+               ),
+               
+               # Net amount row
+               tags$div(class = "financial-card",
+                        tags$div(class = paste("financial-metric", net_class), style = "width: 100%;",
+                                 tags$p(class = "financial-label", "Net Balance"),
+                                 tags$p(class = "financial-value", net_formatted)
+                        )
+               )
+      )
+    )
+  })
+  
+  # Calculate net cash flow (income - expenses)
+  calculate_net_cash_flow <- reactive({
+    req(user_data$user_id)
+    
+    # Get the date range
+    end_date <- Sys.Date()
+    
+    if(user_data$limit_period == "monthly") {
+      start_date <- as.Date(format(end_date, "%Y-%m-01"))
+    } else if(user_data$limit_period == "weekly") {
+      days_since_monday <- as.numeric(format(end_date, "%u")) - 1
+      start_date <- end_date - days_since_monday
+    } else {
+      start_date <- end_date - 30
+    }
+    
+    # Get total expenses
+    expenses_query <- dbSendQuery(con, sprintf(
+      "SELECT SUM(amount) as total FROM expenses WHERE user_id = %d AND date >= '%s' AND date <= '%s'",
+      user_data$user_id, start_date, end_date
+    ))
+    expenses_result <- dbFetch(expenses_query)
+    dbClearResult(expenses_query)
+    
+    total_expenses <- if(is.null(expenses_result$total) || is.na(expenses_result$total)) 0 else expenses_result$total
+    
+    # Get total income
+    income_query <- dbSendQuery(con, sprintf(
+      "SELECT SUM(amount) as total FROM income WHERE user_id = %d AND date >= '%s' AND date <= '%s'",
+      user_data$user_id, start_date, end_date
+    ))
+    income_result <- dbFetch(income_query)
+    dbClearResult(income_query)
+    
+    total_income <- if(is.null(income_result$total) || is.na(income_result$total)) 0 else income_result$total
+    
+    # Calculate net cash flow
+    net_cash_flow <- total_income - total_expenses
+    
+    return(list(
+      expenses = total_expenses,
+      income = total_income,
+      net = net_cash_flow
+    ))
+  })
+  
+  # Observe event to update goal dropdown
+  observe({
+    req(user_data$user_id)
+    
+    # Get active goals
+    goals <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT id, name FROM savings_goals WHERE user_id = %d AND is_active = 1 ORDER BY name",
+        user_data$user_id
+      )
+    )
+    
+    if (nrow(goals) > 0) {
+      goal_choices <- setNames(as.character(goals$id), goals$name)
+      updateSelectInput(session, "contribution_goal_id", choices = goal_choices)
+    } else {
+      updateSelectInput(session, "contribution_goal_id", choices = c("No goals available" = ""))
+    }
+  })
+  
+  # Add goal handler
+  observeEvent(input$add_goal_btn, {
+    req(user_data$user_id, input$goal_name, input$goal_amount, input$goal_category)
+    
+    # Validate inputs
+    if (input$goal_amount <= 0) {
+      shinyalert(
+        title = "Invalid Amount",
+        text = "Please enter a positive amount for your goal.",
+        type = "error"
+      )
+      return()
+    }
+    
+    # Format the date or use NULL
+    target_date <- if(is.null(input$goal_date) || input$goal_date == "") "NULL" else sprintf("'%s'", input$goal_date)
+    
+    # Escape single quotes in strings
+    safe_name <- gsub("'", "''", input$goal_name)
+    safe_category <- gsub("'", "''", input$goal_category)
+    
+    # Insert goal
+    dbExecute(
+      con,
+      sprintf(
+        "INSERT INTO savings_goals (user_id, name, target_amount, target_date, category) VALUES (%d, '%s', %.2f, %s, '%s')",
+        user_data$user_id, safe_name, input$goal_amount, target_date, safe_category
+      )
+    )
+    
+    # Increment update counter
+    expense_tracker$update_counter <- expense_tracker$update_counter + 1
+    
+    # Reset form
+    updateTextInput(session, "goal_name", value = "")
+    updateNumericInput(session, "goal_amount", value = 0)
+    updateDateInput(session, "goal_date", value = NULL)
+    
+    # Show success message
+    shinyalert(
+      title = "Savings Goal Added",
+      text = sprintf("Your goal '%s' for %s has been added successfully.",
+                     input$goal_name, format_currency(input$goal_amount, app_settings$currency)),
+      type = "success",
+      timer = 2000,
+      showConfirmButton = FALSE
+    )
+  })
+  
+  # Add contribution handler
+  observeEvent(input$add_contribution_btn, {
+    req(user_data$user_id, input$contribution_goal_id, input$contribution_amount, input$contribution_date)
+    
+    # Validate inputs
+    if (input$contribution_amount <= 0) {
+      shinyalert(
+        title = "Invalid Amount",
+        text = "Please enter a positive amount for your contribution.",
+        type = "error"
+      )
+      return()
+    }
+    
+    if (input$contribution_goal_id == "") {
+      shinyalert(
+        title = "No Goal Selected",
+        text = "Please select a goal to contribute to.",
+        type = "error"
+      )
+      return()
+    }
+    
+    # Update the goal's current amount
+    dbExecute(
+      con,
+      sprintf(
+        "UPDATE savings_goals SET current_amount = current_amount + %.2f WHERE id = %s AND user_id = %d",
+        input$contribution_amount, input$contribution_goal_id, user_data$user_id
+      )
+    )
+    
+    # Increment update counter
+    expense_tracker$update_counter <- expense_tracker$update_counter + 1
+    
+    # Reset form
+    updateNumericInput(session, "contribution_amount", value = 0)
+    
+    # Get goal name for the success message
+    goal_info <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT name FROM savings_goals WHERE id = %s AND user_id = %d",
+        input$contribution_goal_id, user_data$user_id
+      )
+    )
+    
+    # Show success message
+    if (nrow(goal_info) > 0) {
+      shinyalert(
+        title = "Contribution Added",
+        text = sprintf("Your contribution of %s to '%s' has been added successfully.",
+                       format_currency(input$contribution_amount, app_settings$currency), goal_info$name[1]),
+        type = "success",
+        timer = 2000,
+        showConfirmButton = FALSE
+      )
+    }
+  })
+  
+  # Goals list UI
+  output$goals_list <- renderUI({
+    req(user_data$user_id)
+    
+    # Get goals data
+    goals <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT id, name, target_amount, current_amount, target_date, category, is_active 
+       FROM savings_goals 
+       WHERE user_id = %d
+       ORDER BY is_active DESC, target_date ASC, name ASC",
+        user_data$user_id
+      )
+    )
+    
+    if (nrow(goals) == 0) {
+      return(div(
+        style = "text-align: center; padding: 20px;",
+        "No savings goals found. Add your first goal above!"
+      ))
+    }
+    
+    # Create a list of goal cards
+    tagList(
+      lapply(1:nrow(goals), function(i) {
+        goal <- goals[i, ]
+        
+        # Calculate percentage complete
+        percentage <- min(100, round(goal$current_amount / goal$target_amount * 100))
+        
+        # Format target date
+        target_date_text <- if(is.na(goal$target_date) || goal$target_date == "") "No target date" else format(as.Date(goal$target_date), "%d %b %Y")
+        
+        # Determine progress bar color
+        bar_color <- if(percentage >= 80) "#28a745" else if(percentage >= 50) "#17a2b8" else "#007bff"
+        
+        # Create a card for each goal
+        div(
+          class = "goal-card",
+          style = paste0("border: 1px solid #ddd; border-radius: 8px; padding: 15px; margin-bottom: 15px; ", 
+                         if(!goal$is_active) "opacity: 0.6;" else ""),
+          div(
+            style = "display: flex; justify-content: space-between; align-items: center;",
+            h4(goal$name, style = "margin: 0;"),
+            if(goal$is_active) {
+              actionButton(
+                inputId = paste0("toggle_goal_", goal$id),
+                label = "Complete",
+                class = "btn-sm btn-outline-success"
+              )
+            } else {
+              actionButton(
+                inputId = paste0("toggle_goal_", goal$id),
+                label = "Reactivate",
+                class = "btn-sm btn-outline-secondary"
+              )
+            }
+          ),
+          p(
+            style = "margin-top: 10px; color: #666;",
+            sprintf("Category: %s", goal$category)
+          ),
+          p(
+            style = "margin-bottom: 5px;",
+            sprintf("Progress: %s of %s", 
+                    format_currency(goal$current_amount, app_settings$currency),
+                    format_currency(goal$target_amount, app_settings$currency))
+          ),
+          div(
+            class = "progress",
+            style = "height: 20px; margin-bottom: 10px;",
+            div(
+              class = "progress-bar",
+              role = "progressbar",
+              style = sprintf("width: %d%%; background-color: %s;", percentage, bar_color),
+              sprintf("%d%%", percentage)
+            )
+          ),
+          div(
+            style = "display: flex; justify-content: space-between; font-size: 12px; color: #666;",
+            div(sprintf("Target date: %s", target_date_text)),
+            div(
+              style = "text-align: right;",
+              actionButton(
+                inputId = paste0("delete_goal_", goal$id),
+                label = NULL,
+                icon = icon("trash"),
+                class = "btn-sm btn-danger",
+                style = "margin-left: 10px;"
+              )
+            )
+          )
+        )
+      })
+    )
   })
 }
