@@ -10,7 +10,41 @@ ui <- fluidPage(
   # Include external CSS and JavaScript files
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css"),
-    tags$script(src = "scripts.js")
+    tags$script(src = "scripts.js"),
+    tags$style(HTML("
+      /* Make tabs equal width and evenly spaced */
+      .nav-tabs {
+        display: flex;
+        width: 100%;
+      }
+      
+      .nav-tabs > li {
+        flex: 1;
+        text-align: center;
+        float: none;
+      }
+      
+      .nav-tabs > li > a {
+        margin-right: 0;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        padding-left: 5px;
+        padding-right: 5px;
+      }
+      
+      /* Improve tab appearance */
+      .nav-tabs > li.active > a,
+      .nav-tabs > li.active > a:hover,
+      .nav-tabs > li.active > a:focus {
+        font-weight: bold;
+      }
+      
+      /* Make sure icons stay aligned with text */
+      .nav-tabs > li > a > i {
+        margin-right: 5px;
+      }
+    "))
   ),
   
   # User authentication
@@ -241,6 +275,18 @@ ui <- fluidPage(
                       )
                     ),
                     
+                    # Information Tab
+                    tabPanel(
+                      title = "Information",
+                      value = "info",
+                      width = "100%",
+                      div(class = "card p-3",
+                          h4("Information"),
+                          hr(),
+                          p("This is a budget tracker that Claude 3.7 Sonnet and I made with R and Shiny.")
+                      )
+                    ),
+                    
                     # Log Tab
                     tabPanel(
                       title = "Log",
@@ -249,6 +295,7 @@ ui <- fluidPage(
                       div(class = "card p-3",
                           h4("Log"),
                           hr(),
+                          p("27 Mar 25: Add Report, Income Tracking and Savings."),
                           p("26 Mar 25: Adding importing data feature."),
                           p("25 Mar 25: Adding User's budget limit."), 
                           p("24 Mar 25: Initial commit.")
@@ -290,27 +337,117 @@ ui <- fluidPage(
           ),
           
           div(class = "card",
-              h3("Add Expense"),
-              dateInput(inputId = "expense_date", label = "Date", value = Sys.Date(), width = "100%"),
-              textInput(inputId = "expense_name", label = "Description", placeholder = "What did you spend on?", width = "100%"),
-              numericInput(inputId = "expense_amount", label = "Amount (£)", value = 0, min = 0, max = 99999.99, step = 0.01, width = "100%"),
-              selectInput(inputId = "expense_category", label = "Category", choices = expense_categories, width = "100%"),
-              actionButton(inputId = "add_expense_btn", label = "Save Expense", class = "btn-success btn-block")
+              h3("What would you like to add?"),
+              
+              # Action Type Selector
+              radioButtons(
+                inputId = "action_type", 
+                label = "Select action:",
+                choices = c(
+                  "New Transaction" = "transaction", 
+                  "New Savings Goal" = "goal", 
+                  "Goal Contribution" = "contribution"
+                ),
+                selected = "transaction",
+                inline = TRUE
+              ),
+              
+              # Transaction section (shown when action_type = "transaction")
+              conditionalPanel(
+                condition = "input.action_type == 'transaction'",
+                hr(),
+                h4("Add Transaction"),
+                
+                # Transaction Type Selector
+                radioButtons(
+                  inputId = "transaction_type", 
+                  label = "Transaction Type:", 
+                  choices = c("Expense" = "expense", "Income" = "income"),
+                  selected = "expense",
+                  inline = TRUE
+                ),
+                
+                # Common Fields
+                dateInput(inputId = "transaction_date", label = "Date", value = Sys.Date(), width = "100%"),
+                
+                # Expense fields
+                conditionalPanel(
+                  condition = "input.transaction_type == 'expense'",
+                  textInput(inputId = "expense_name", label = "Description", placeholder = "What did you spend on?", width = "100%"),
+                  numericInput(inputId = "expense_amount", label = "Amount", value = 0, min = 0, max = 99999.99, step = 0.01, width = "100%"),
+                  selectInput(inputId = "expense_category", label = "Category", choices = expense_categories, width = "100%")
+                ),
+                
+                # Income fields
+                conditionalPanel(
+                  condition = "input.transaction_type == 'income'",
+                  textInput(inputId = "income_source", label = "Source", placeholder = "Where did this income come from?", width = "100%"),
+                  numericInput(inputId = "income_amount", label = "Amount", value = 0, min = 0, max = 99999.99, step = 0.01, width = "100%"),
+                  selectInput(inputId = "income_category", label = "Category", 
+                              choices = c("Salary", "Freelance", "Investments", "Gifts", "Refunds", "Other"), width = "100%")
+                ),
+                
+                # Save Transaction Button
+                actionButton(inputId = "save_transaction_btn", label = "Save Transaction", class = "btn-success btn-block")
+              ),
+              
+              # Savings Goal section (shown when action_type = "goal")
+              conditionalPanel(
+                condition = "input.action_type == 'goal'",
+                hr(),
+                h4("Add Savings Goal"),
+                textInput(inputId = "goal_name", label = "Goal Name", placeholder = "What are you saving for?", width = "100%"),
+                numericInput(inputId = "goal_amount", label = "Target Amount", value = 0, min = 0, step = 10, width = "100%"),
+                dateInput(inputId = "goal_date", label = "Target Date (Optional)", value = NULL, width = "100%"),
+                selectInput(inputId = "goal_category", label = "Category", 
+                            choices = c("Emergency Fund", "Home", "Car", "Vacation", "Education", "Retirement", "Other"), 
+                            width = "100%"),
+                actionButton(inputId = "add_goal_btn", label = "Save Goal", class = "btn-success btn-block")
+              ),
+              
+              # Contribution section (shown when action_type = "contribution")
+              conditionalPanel(
+                condition = "input.action_type == 'contribution'",
+                hr(),
+                h4("Add Contribution to Goal"),
+                selectInput(inputId = "contribution_goal_id", label = "Select Goal", choices = NULL, width = "100%"),
+                numericInput(inputId = "contribution_amount", label = "Amount", value = 0, min = 0, step = 10, width = "100%"),
+                dateInput(inputId = "contribution_date", label = "Date", value = Sys.Date(), width = "100%"),
+                actionButton(inputId = "add_contribution_btn", label = "Add Contribution", class = "btn-primary btn-block")
+              )
           )
         ),
         
-        # Report Tab
+        # Summary Tab
         tabPanel(
           title = "Report",
           value = "report",
-          icon = icon("list"),
+          icon = icon("chart-bar"),  # Bar chart icon for reporting
           
-          # Budget Progress Card
+          # Financial Summary
           div(class = "card",
-              h3("Budget Progress"),
+              h3("Financial health"),
+              uiOutput("financial_summary")
+          ),
+          
+          # Spending Limit
+          div(class = "card",
+              # Budget progress section
+              h3("Spending Limit"),
               uiOutput("budget_progress")
           ),
           
+          # Goals List
+          div(class = "card",
+              h3("Your Savings Goals"),
+              uiOutput("goals_list")
+          )
+        ),
+        
+        tabPanel(
+          title = "Expenses",
+          value = "expenses",
+          icon = icon("shopping-cart"),
           div(class = "card",
               h3("Expenses Period"),
               
@@ -357,6 +494,17 @@ ui <- fluidPage(
               ),
               
               uiOutput("expense_list")
+          )
+        ),
+        
+        # Income Tab
+        tabPanel(
+          title = "Income",
+          value = "income",
+          icon = icon("wallet"),
+          div(class = "card",
+              h3("Income History"),
+              uiOutput("income_list")
           )
         )
       )

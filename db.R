@@ -63,5 +63,39 @@ setup_db <- function() {
     ")
   }
   
+  # Create income table if it doesn't exist
+  if (!dbExistsTable(con, "income")) {
+    dbExecute(con, "
+    CREATE TABLE income (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      date DATE NOT NULL,
+      source_name TEXT NOT NULL,
+      amount NUMERIC NOT NULL,
+      category TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  ")
+  }
+  
+  # Create savings_goals table if it doesn't exist
+  if (!dbExistsTable(con, "savings_goals")) {
+    dbExecute(con, "
+    CREATE TABLE savings_goals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      target_amount NUMERIC NOT NULL,
+      current_amount NUMERIC DEFAULT 0,
+      target_date DATE,
+      category TEXT,
+      is_active BOOLEAN DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  ")
+  }
+  
   return(con)
 }

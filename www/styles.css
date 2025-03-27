@@ -341,3 +341,11 @@ body.dark-mode #expense_text_data {
   color: #ffffff;
   border-color: #333333;
 }
+
+.shiny-input-container {
+  transition: opacity 0.3s ease;
+}
+
+.shiny-input-container.recalculating {
+  opacity: 0.5;
+}
