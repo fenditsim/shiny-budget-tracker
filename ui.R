@@ -116,6 +116,38 @@ ui <- fluidPage(
     )
   ),
   
+  # Hidden edit income modal UI
+  shinyjs::hidden(
+    div(
+      id = "edit-income-modal",
+      class = "modal",
+      style = "display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);",
+      div(
+        class = "modal-content card",
+        style = "background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px;",
+        div(
+          style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;",
+          h3("Edit Income", id = "edit-income-title"),
+          actionButton(inputId = "close_edit_income_modal_btn", label = NULL, icon = icon("times"), class = "btn-sm")
+        ),
+        # Hidden income ID using div with hidden style
+        div(style = "display: none;",
+            textInput(inputId = "edit_income_id", label = NULL, value = "")
+        ),
+        dateInput(inputId = "edit_income_date", label = "Date", value = Sys.Date(), width = "100%"),
+        textInput(inputId = "edit_income_source", label = "Source", placeholder = "Where did the income come from?", width = "100%"),
+        numericInput(inputId = "edit_income_amount", label = "Amount", value = 0, min = 0, max = 99999.99, step = 0.01, width = "100%"),
+        selectInput(inputId = "edit_income_category", label = "Category", 
+                    choices = c("Salary", "Freelance", "Investments", "Gifts", "Refunds", "Other"), width = "100%"),
+        div(
+          style = "text-align: right; margin-top: 20px;",
+          actionButton(inputId = "cancel_edit_income_btn", label = "Cancel", class = "btn-secondary", style = "margin-right: 10px;"),
+          actionButton(inputId = "save_edit_income_btn", label = "Save Changes", class = "btn-success")
+        )
+      )
+    )
+  ),
+  
   # Hidden settings page
   shinyjs::hidden(
     div(
@@ -295,7 +327,8 @@ ui <- fluidPage(
                       div(class = "card p-3",
                           h4("Log"),
                           hr(),
-                          p("27 Mar 25: Add Report, Income Tracking and Savings."),
+                          p("28 Mar 25: Fixing Income Tab."),
+                          p("27 Mar 25: Adding Report, Income Tracking and Savings."),
                           p("26 Mar 25: Adding importing data feature."),
                           p("25 Mar 25: Adding User's budget limit."), 
                           p("24 Mar 25: Initial commit.")
@@ -444,14 +477,13 @@ ui <- fluidPage(
           )
         ),
         
+        # Expenses Tab
         tabPanel(
           title = "Expenses",
           value = "expenses",
           icon = icon("shopping-cart"),
           div(class = "card",
               h3("Expenses Period"),
-              
-              # Date range filter (using two separate date inputs)
               div(
                 style = "display: flex; justify-content: space-between;",
                 div(style = "width: 48%;", dateInput(inputId = "date_range_start", label = "From", value = Sys.Date() - 30, width = "100%")),
@@ -502,9 +534,52 @@ ui <- fluidPage(
           title = "Income",
           value = "income",
           icon = icon("wallet"),
+          
           div(class = "card",
-              h3("Income History"),
-              uiOutput("income_list")
+              h3("Income Period"),
+              div(
+                style = "display: flex; justify-content: space-between;",
+                div(style = "width: 48%;", dateInput(inputId = "date_range_start", label = "From", value = Sys.Date() - 30, width = "100%")),
+                div(style = "width: 48%;", dateInput(inputId = "date_range_end", label = "To", value = Sys.Date(), width = "100%"))
+              ),
+          ),
+          
+          div(class = "card",
+              h3("Income Distribution"),
+              # Add a container for the donut chart
+              echarts4rOutput(outputId = "income_donut_chart", height = "400px")
+          ),
+          
+          div(class = "card",
+             h3("Income History"),
+             selectInput(inputId = "income_filter", label = "Filter by category", 
+                         choices = c("Salary", "Freelance", "Investments", "Gifts", "Refunds", "Other"), 
+                         multiple = TRUE, selectize = TRUE, width = "100%"),
+             
+             # Export options
+             div(class = "export-container",
+                 div(class = "export-format-select",
+                     selectInput(
+                       inputId = "export_income_format",
+                       label = "Export as:",
+                       choices = c(
+                         "CSV (.csv)" = "csv",
+                         "Excel (.xlsx)" = "xlsx",
+                         "Tab Delimited (.txt)" = "txt",
+                         "JSON (.json)" = "json"
+                       ),
+                       selected = "csv",
+                       width = "auto"
+                     )
+                 ),
+                 downloadButton(
+                   outputId = "download_income",
+                   label = "Export",
+                   class = "btn-primary"
+                 )
+             ),
+             
+             uiOutput("income_list")
           )
         )
       )

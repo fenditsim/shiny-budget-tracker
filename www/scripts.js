@@ -106,3 +106,19 @@ $(document).ready(function() {
   // Log to console for debugging
   console.log('Enhanced login form Enter key handlers initialized');
 });
+
+//Edit Income Modal Control Functions//
+// Modal control functions for income editing
+function showEditIncomeModal() {
+  var modal = document.getElementById("edit-income-modal");
+  if (modal) {
+    modal.style.display = "block";
+  }
+}
+
+function hideEditIncomeModal() {
+  var modal = document.getElementById("edit-income-modal");
+  if (modal) {
+    modal.style.display = "none";
+  }
+}

@@ -222,6 +222,12 @@ server <- function(input, output, session) {
     shown_dialogs = list()  # Add dialog tracking here
   )
   
+  # Add reactive value to track income changes
+  income_tracker <- reactiveValues(
+    update_counter = 0,
+    shown_dialogs = list()  # Add dialog tracking here
+  )
+  
   # Update currency sign next to Amount automatically
   observeEvent(app_settings$currency, {
     if (user_data$is_authenticated) {
@@ -1351,6 +1357,69 @@ server <- function(input, output, session) {
     return(chart)
   })
   
+  # Reactive function to get income chart data
+  get_income_chart_data <- reactive({
+    req(user_data$user_id)
+    
+    # Add explicit dependency on income tracker to ensure updates when income change
+    income_tracker$update_counter
+    
+    # Apply date filters
+    date_filter <- ""
+    if (!is.null(input$date_range_start) && !is.null(input$date_range_end)) {
+      date_filter <- sprintf("AND date BETWEEN '%s' AND '%s'", 
+                             input$date_range_start, input$date_range_end)
+    }
+    
+    # Get income grouped by category
+    income <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT category, SUM(amount) as total FROM income 
+        WHERE user_id = %d %s 
+        GROUP BY category
+        ORDER BY total DESC",
+        user_data$user_id, date_filter
+      )
+    )
+    
+    # Return the data for the chart
+    return(income)
+  })
+  
+  output$income_donut_chart <- renderEcharts4r({
+    req(user_data$is_authenticated)
+    
+    # Get the data
+    chart_data <- get_income_chart_data()
+    
+    # Check if we have data
+    if(nrow(chart_data) == 0) {
+      return(NULL)
+    }
+    
+    # Format currency values for the tooltip
+    tooltip_formatter <- sprintf("function(params) {
+      return params.name + ': %s' + params.value.toFixed(2) + ' (' + params.percent + '%%)'
+    }", app_settings$currency_symbol)
+    
+    # Create the donut chart
+    chart <- chart_data |>
+      e_charts(category) |>
+      e_pie(total, radius = c("40%", "70%")) |>  # Use radius to create a donut chart
+      e_tooltip(formatter = htmlwidgets::JS(tooltip_formatter))
+    
+    # Apply theme based on app settings
+    if(app_settings$theme == "dark") {
+      chart <- chart |> e_theme("dark")
+    }
+    
+    # Add save as image feature
+    chart <- chart |> e_toolbox_feature(feature = "saveAsImage")
+    
+    return(chart)
+  })
+
   # Function to generate expense list content
   expense_list_content <- function() {
     req(user_data$user_id)
@@ -2272,12 +2341,24 @@ server <- function(input, output, session) {
         )
       )
       
-      # Force a slightly different update counter value
-      new_counter <- expense_tracker$update_counter + 1
-      expense_tracker$update_counter <- new_counter
-      cat("Updated counter to:", new_counter, "\n")
+      # Update income_tracker counter instead of expense_tracker
+      income_tracker$update_counter <- income_tracker$update_counter + 1
+      cat("Updated income counter to:", income_tracker$update_counter, "\n")
       
-      # Success message and form reset...
+      # Reset form
+      updateTextInput(session, "income_source", value = "")
+      updateNumericInput(session, "income_amount", value = 0)
+      
+      # Show success message
+      shinyalert(
+        title = "Income Added",
+        text = sprintf("Your income of %s from %s has been added successfully.",
+                       format_currency(input$income_amount, app_settings$currency), 
+                       input$income_source),
+        type = "success",
+        timer = 2000,
+        showConfirmButton = FALSE
+      )
     }, error = function(e) {
       cat("Error adding income:", e$message, "\n")
       shinyalert(title = "Error", text = e$message, type = "error")
@@ -2370,6 +2451,297 @@ server <- function(input, output, session) {
     )
   })
   
+  # Function to generate income list content
+  income_list_content <- function() {
+    req(user_data$user_id)
+    
+    # Apply filters
+    date_filter <- ""
+    if (!is.null(input$date_range_start) && !is.null(input$date_range_end)) {
+      date_filter <- sprintf("AND date BETWEEN '%s' AND '%s'", 
+                             input$date_range_start, input$date_range_end)
+    }
+    
+    category_filter <- ""
+    if (!is.null(input$income_filter) && length(input$income_filter) > 0) {
+      categories <- paste0("'", input$income_filter, "'", collapse = ",")
+      category_filter <- sprintf("AND category IN (%s)", categories)
+    }
+    
+    # Get income entries
+    income <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT id, date, source_name, amount, category FROM income 
+      WHERE user_id = %d %s %s 
+      ORDER BY date DESC, id DESC 
+      LIMIT 100",
+        user_data$user_id, date_filter, category_filter
+      )
+    )
+    
+    if (nrow(income) == 0) {
+      return(div(
+        style = "text-align: center; padding: 20px;",
+        "No income entries found for the selected criteria."
+      ))
+    }
+    
+    # Calculate total
+    total <- sum(income$amount)
+    
+    # Create a simple HTML table
+    result <- div(
+      style = "overflow-x: auto;",
+      tags$table(
+        class = "table table-striped",
+        tags$thead(
+          tags$tr(
+            tags$th("Date"),
+            tags$th("Source"),
+            tags$th("Category"),
+            tags$th("Amount"),
+            tags$th("Actions", style = "text-align: center;")
+          )
+        ),
+        tags$tbody(
+          lapply(1:nrow(income), function(i) {
+            inc <- income[i, ]
+            tags$tr(
+              tags$td(format(as.Date(inc$date), "%d %b %Y")),
+              tags$td(inc$source_name),
+              tags$td(inc$category),
+              tags$td(sprintf("%s%.2f", app_settings$currency_symbol, inc$amount), style = "text-align: right;"),
+              tags$td(
+                style = "text-align: center; white-space: nowrap;",
+                actionButton(
+                  inputId = paste0("edit_income_", inc$id),
+                  label = NULL,
+                  icon = icon("edit"),
+                  class = "btn-sm btn-primary",
+                  style = "margin-right: 5px;"
+                ),
+                actionButton(
+                  inputId = paste0("delete_income_", inc$id),
+                  label = NULL,
+                  icon = icon("trash"),
+                  class = "btn-sm btn-danger",
+                  `data-version` = income_tracker$update_counter
+                )
+              )
+            )
+          })
+        ),
+        tags$tfoot(
+          tags$tr(
+            tags$th(colspan = 3, "Total", style = "text-align: right;"),
+            tags$th(sprintf("%s%.2f", app_settings$currency_symbol, total), style = "text-align: right;")
+          )
+        )
+      )
+    )
+    
+    # Reset button states when refreshing the income list
+    shinyjs::runjs("
+    // Reset all edit and delete button states to initial state
+    setTimeout(function() {
+      var editButtons = document.querySelectorAll('[id^=\"edit_income_\"]');
+      var deleteButtons = document.querySelectorAll('[id^=\"delete_income_\"]');
+      
+      editButtons.forEach(function(btn) {
+        Shiny.setInputValue(btn.id, 0, {priority: 'event'});
+      });
+      
+      deleteButtons.forEach(function(btn) {
+        Shiny.setInputValue(btn.id, 0, {priority: 'event'});
+      });
+    }, 100);
+  ")
+    
+    # Reset shown_dialogs when refreshing UI
+    income_tracker$shown_dialogs <- list()
+    
+    return(result)
+  }
+  
+  # Income list UI output
+  output$income_list <- renderUI({
+    req(user_data$user_id)
+    
+    # Add dependency on the income tracker to force updates
+    income_tracker$update_counter
+    
+    result <- income_list_content()
+    
+    # Add inline CSS for dark mode table styles if in dark mode
+    if(app_settings$theme == "dark") {
+      result <- tagList(
+        tags$style(HTML("
+      #income_list .table {
+        background-color: #1e1e1e !important;
+      }
+      #income_list .table tbody tr {
+        background-color: #1e1e1e !important;
+      }
+      #income_list .table tbody tr:nth-of-type(odd) {
+        background-color: #2a2a2a !important;
+      }
+      #income_list .table tbody td {
+        background-color: inherit !important;
+        color: #FFFFFF !important;
+      }
+      #income_list .table thead th {
+        background-color: #1e1e1e !important;
+        color: #FFFFFF !important;
+      }
+      #income_list .table tfoot tr {
+        background-color: #1e1e1e !important;
+      }
+      #income_list .table tfoot th {
+        background-color: #1e1e1e !important;
+        color: #FFFFFF !important;
+      }
+    ")),
+        result
+      )
+      
+      # Also apply the JavaScript styling after a short delay
+      shinyjs::delay(100, {
+        shinyjs::runjs('
+      if (typeof applyDarkModeToTables === "function") {
+        applyDarkModeToTables();
+      }
+    ')
+      })
+    }
+    
+    return(result)
+  })
+  
+  # Reactive function to get filtered income data for export
+  get_filtered_income <- reactive({
+    req(user_data$user_id)
+    
+    # Apply filters
+    date_filter <- ""
+    if (!is.null(input$date_range_start) && !is.null(input$date_range_end)) {
+      date_filter <- sprintf("AND date BETWEEN '%s' AND '%s'", 
+                             input$date_range_start, input$date_range_end)
+    }
+    
+    category_filter <- ""
+    if (!is.null(input$income_filter) && length(input$income_filter) > 0) {
+      categories <- paste0("'", input$income_filter, "'", collapse = ",")
+      category_filter <- sprintf("AND category IN (%s)", categories)
+    }
+    
+    # Get income entries
+    income <- dbGetQuery(
+      con,
+      sprintf(
+        "SELECT date, source_name, category, amount FROM income 
+      WHERE user_id = %d %s %s 
+      ORDER BY date DESC, id DESC 
+      LIMIT 1000", # Increased limit for exports
+        user_data$user_id, date_filter, category_filter
+      )
+    )
+    
+    # The formatting will be done by the download handler based on the export format
+    return(income)
+  })
+  
+  # Download handler for income exports
+  output$download_income <- downloadHandler(
+    filename = function() {
+      format <- input$export_income_format
+      date_range <- format(Sys.Date(), "%Y%m%d")
+      
+      if (!is.null(input$date_range_start) && !is.null(input$date_range_end)) {
+        start_date <- format(as.Date(input$date_range_start), "%Y%m%d")
+        end_date <- format(as.Date(input$date_range_end), "%Y%m%d")
+        date_range <- paste0(start_date, "-", end_date)
+      }
+      
+      paste0("income_", date_range, ".", format)
+    },
+    
+    content = function(file) {
+      # Get filtered data
+      income <- get_filtered_income()
+      
+      # Format data based on export type
+      format <- input$export_income_format
+      
+      if (format == "csv" || format == "txt") {
+        # For CSV and TXT formats, use numeric amounts without currency symbols
+        
+        # Make a copy of the data frame
+        export_data <- income
+        
+        # Ensure date is in YYYY-MM-DD format for easy import
+        export_data$date <- format(as.Date(export_data$date), "%Y-%m-%d")
+        
+        # Make sure amount is numeric (no currency symbol)
+        export_data$amount <- as.numeric(export_data$amount)
+        
+        # Ensure column names
+        colnames(export_data) <- c("date", "source_name", "category", "amount")
+        
+        if (format == "csv") {
+          # Standard CSV export
+          write.csv(export_data, file, row.names = FALSE)
+        } else if (format == "txt") {
+          # Custom TXT export format (simple CSV in a TXT file)
+          write.table(export_data, file, sep = ",", row.names = FALSE, 
+                      col.names = TRUE, quote = TRUE)
+        }
+      } else if (format == "xlsx") {
+        # For Excel, use more user-friendly column names
+        export_data <- income
+        
+        # Format date more nicely for Excel
+        export_data$date <- format(as.Date(export_data$date), "%Y-%m-%d")
+        
+        # Format amount with currency symbol for Excel
+        export_data$amount <- as.numeric(export_data$amount)
+        
+        # Use more readable column names
+        colnames(export_data) <- c("Date", "Source", "Category", "Amount")
+        
+        writexl::write_xlsx(export_data, file)
+      } else if (format == "json") {
+        # For JSON, use original column names but clean formatting
+        export_data <- income
+        
+        # Format date consistently
+        export_data$date <- format(as.Date(export_data$date), "%Y-%m-%d")
+        
+        # Numeric amount without currency symbol
+        export_data$amount <- as.numeric(export_data$amount)
+        
+        # Convert to JSON
+        json_data <- jsonlite::toJSON(export_data, pretty = TRUE)
+        writeLines(json_data, file)
+      }
+    }
+  )
+  
+  # Observe income filter changes
+  observeEvent(input$income_filter, {
+    if(user_data$is_authenticated && app_settings$theme == "dark") {
+      shinyjs::delay(100, {
+        shinyjs::runjs('
+        if (document.body.classList.contains("dark-mode")) {
+          if (typeof applyDarkModeToTables === "function") {
+            applyDarkModeToTables();
+          }
+        }
+      ')
+      })
+    }
+  })
+    
   # Unified save transaction handler
   observeEvent(input$save_transaction_btn, {
     req(user_data$user_id, input$transaction_date)
@@ -2405,6 +2777,7 @@ server <- function(input, output, session) {
       
     } else if(input$transaction_type == "income") {
       req(input$income_source, input$income_amount, input$income_category)
+      income_tracker$update_counter <- income_tracker$update_counter + 1
       
       # Escape single quotes
       safe_source_name <- sql_escape(input$income_source)
@@ -2780,4 +3153,269 @@ server <- function(input, output, session) {
       })
     )
   })
+  
+  # Modal control for edit income
+  observeEvent(input$close_edit_income_modal_btn, {
+    shinyjs::hide("edit-income-modal")
+    shinyjs::runjs("hideEditIncomeModal();")
+  })
+  
+  observeEvent(input$cancel_edit_income_btn, {
+    shinyjs::hide("edit-income-modal")
+    shinyjs::runjs("hideEditIncomeModal();")
+  })
+  
+  # Save edited income
+  observeEvent(input$save_edit_income_btn, {
+    req(input$edit_income_date, input$edit_income_source, 
+        input$edit_income_amount, input$edit_income_category)
+    
+    # Robust income ID validation
+    income_id_str <- input$edit_income_id
+    
+    # Log for debugging
+    cat("Income ID from form:", income_id_str, "\n")
+    
+    # Try to convert to integer, catch any errors
+    income_id <- tryCatch({
+      id <- as.integer(income_id_str)
+      if (is.na(id) || id <= 0) NA else id
+    }, error = function(e) {
+      cat("Error converting income ID:", e$message, "\n")
+      NA
+    })
+    
+    if (is.na(income_id)) {
+      shinyalert(
+        title = "Error",
+        text = "Invalid income ID. Please try again.",
+        type = "error"
+      )
+      return()
+    }
+    
+    # Update the income in the database
+    tryCatch({
+      # Use safer query building with paste0 instead of sprintf
+      update_query <- paste0(
+        "UPDATE income SET date = '", input$edit_income_date, 
+        "', source_name = '", gsub("'", "''", input$edit_income_source), 
+        "', amount = ", input$edit_income_amount, 
+        ", category = '", gsub("'", "''", input$edit_income_category), 
+        "' WHERE id = ", income_id, 
+        " AND user_id = ", user_data$user_id
+      )
+      
+      dbExecute(con, update_query)
+      
+      # Increment the update counter to trigger UI refresh
+      income_tracker$update_counter <- income_tracker$update_counter + 1
+      
+      # Hide the modal
+      shinyjs::hide("edit-income-modal")
+      shinyjs::runjs("hideEditIncomeModal();")
+      
+      # Show success message
+      shinyalert(
+        title = "Income Updated",
+        text = "Your income entry has been updated successfully.",
+        type = "success",
+        timer = 2000,
+        showConfirmButton = FALSE
+      )
+    }, error = function(e) {
+      cat("Error updating income:", e$message, "\n")
+      shinyalert(
+        title = "Error",
+        text = "There was a problem updating the income entry. Please try again.",
+        type = "error"
+      )
+    })
+  })
+  
+  # Edit income handler
+  observeEvent(eventExpr = {
+    lapply(names(input)[grepl("^edit_income_", names(input))], function(x) input[[x]])
+  }, {
+    # Get all button names that match the pattern
+    btn_ids <- names(input)[grepl("^edit_income_", names(input))]
+    
+    if (length(btn_ids) > 0) {
+      # Create a vector of button values
+      btn_values <- sapply(btn_ids, function(x) input[[x]])
+      
+      # Only proceed if any button has been clicked (value > 0)
+      if(any(btn_values > 0)) {
+        # Find which button has the maximum value (was clicked)
+        max_idx <- which.max(btn_values)
+        
+        # Make sure we got a valid index
+        if (length(max_idx) > 0 && !is.na(max_idx) && max_idx > 0) {
+          btn_id <- btn_ids[max_idx]
+          
+          if (!is.null(btn_id) && !is.na(btn_id)) {
+            # Extract the income ID from the button ID
+            id_text <- gsub("edit_income_", "", btn_id)
+            
+            # Verify we have a numeric ID
+            if (!is.na(id_text) && nchar(id_text) > 0) {
+              income_id <- as.integer(id_text)
+              
+              if (!is.na(income_id) && income_id > 0) {
+                # Query the income data safely
+                tryCatch({
+                  query <- paste0("SELECT * FROM income WHERE id = ", income_id, " AND user_id = ", user_data$user_id)
+                  income_data <- dbGetQuery(con, query)
+                  
+                  if (nrow(income_data) > 0) {
+                    # Populate the edit form
+                    updateDateInput(session, "edit_income_date", value = as.Date(income_data$date))
+                    updateTextInput(session, "edit_income_source", value = income_data$source_name)
+                    updateNumericInput(session, "edit_income_amount", 
+                                       label = paste0("Amount (", app_settings$currency_symbol, ")"),
+                                       value = income_data$amount)
+                    updateSelectInput(session, "edit_income_category", selected = income_data$category)
+                    updateTextInput(session, "edit_income_id", value = as.character(income_id))
+                    
+                    # Show the modal
+                    shinyjs::show("edit-income-modal")
+                    
+                    # Add JavaScript to ensure modal is visible
+                    shinyjs::runjs("showEditIncomeModal();")
+                  }
+                }, error = function(e) {
+                  # Log the error
+                  cat("Error querying income data:", e$message, "\n")
+                  shinyalert(
+                    title = "Error",
+                    text = "There was a problem loading the income data. Please try again.",
+                    type = "error"
+                  )
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+  }, ignoreInit = TRUE)
+  
+  # Delete income handler
+  observeEvent(eventExpr = {
+    lapply(names(input)[grepl("^delete_income_", names(input))], function(x) input[[x]])
+  }, {
+    # Get all button names that match the pattern
+    btn_ids <- names(input)[grepl("^delete_income_", names(input))]
+    
+    if (length(btn_ids) > 0) {
+      # Create a vector of button values
+      btn_values <- sapply(btn_ids, function(x) input[[x]])
+      
+      # Only proceed if any button has been clicked (value > 0)
+      if(any(btn_values > 0)) {
+        # Find which button has the maximum value (was clicked)
+        max_idx <- which.max(btn_values)
+        
+        # Make sure we got a valid index
+        if (length(max_idx) > 0 && !is.na(max_idx) && max_idx > 0) {
+          btn_id <- btn_ids[max_idx]
+          
+          if (!is.null(btn_id) && !is.na(btn_id)) {
+            # Extract the income ID from the button ID
+            id_text <- gsub("delete_income_", "", btn_id)
+            
+            # Verify we have a numeric ID
+            if (!is.na(id_text) && nchar(id_text) > 0) {
+              income_id <- as.integer(id_text)
+              
+              if (!is.na(income_id) && income_id > 0) {
+                # Use the reactive value to track shown dialogs
+                click_key <- paste0(btn_id, "_", input[[btn_id]])
+                
+                # Only show the dialog if we haven't shown it for this click
+                if (!(click_key %in% names(income_tracker$shown_dialogs))) {
+                  # Set the button state to 0 immediately to prevent multiple triggers
+                  shinyjs::runjs(paste0("Shiny.setInputValue('", btn_id, "', 0, {priority: 'event'});"))
+                  
+                  # Add this click to shown dialogs
+                  temp_dialogs <- income_tracker$shown_dialogs
+                  temp_dialogs[[click_key]] <- TRUE
+                  income_tracker$shown_dialogs <- temp_dialogs
+                  
+                  # Query the income data safely
+                  tryCatch({
+                    query <- paste0("SELECT * FROM income WHERE id = ", income_id, " AND user_id = ", user_data$user_id)
+                    income_data <- dbGetQuery(con, query)
+                    
+                    if (nrow(income_data) > 0) {
+                      # Format the amount with currency
+                      formatted_amount <- format_currency(income_data$amount, app_settings$currency)
+                      formatted_date <- format(as.Date(income_data$date), "%d %b %Y")
+                      
+                      # Show confirmation dialog
+                      shinyalert(
+                        title = "Delete Income",
+                        text = sprintf("Are you sure you want to delete the income of %s from '%s' on %s?", 
+                                       formatted_amount, income_data$source_name, formatted_date),
+                        type = "warning",
+                        showCancelButton = TRUE,
+                        confirmButtonText = "Yes, delete it",
+                        cancelButtonText = "Cancel",
+                        confirmButtonCol = "#dc3545",
+                        callbackR = function(confirmed) {
+                          # Remove from shown dialogs after handling
+                          temp_dialogs <- income_tracker$shown_dialogs
+                          temp_dialogs[[click_key]] <- NULL
+                          income_tracker$shown_dialogs <- temp_dialogs
+                          
+                          if (confirmed) {
+                            # User confirmed deletion, delete the income
+                            tryCatch({
+                              delete_query <- paste0("DELETE FROM income WHERE id = ", income_id, " AND user_id = ", user_data$user_id)
+                              dbExecute(con, delete_query)
+                              
+                              # Increment the update counter to trigger UI refresh
+                              income_tracker$update_counter <- income_tracker$update_counter + 1
+                              
+                              # Also update expense_tracker for financial summary
+                              expense_tracker$update_counter <- expense_tracker$update_counter + 1
+                              
+                              # Show success message
+                              shinyalert(
+                                title = "Income Deleted",
+                                text = "The income entry has been deleted successfully.",
+                                type = "success",
+                                timer = 2000,
+                                showConfirmButton = FALSE
+                              )
+                            }, error = function(e) {
+                              # Error handling
+                              cat("Error deleting income:", e$message, "\n")
+                              shinyalert(
+                                title = "Error",
+                                text = "There was a problem deleting the income entry.",
+                                type = "error"
+                              )
+                            })
+                          }
+                        }
+                      )
+                    }
+                  }, error = function(e) {
+                    # Log the error
+                    cat("Error querying income data for deletion:", e$message, "\n")
+                    
+                    # Remove from shown dialogs on error
+                    temp_dialogs <- income_tracker$shown_dialogs
+                    temp_dialogs[[click_key]] <- NULL
+                    income_tracker$shown_dialogs <- temp_dialogs
+                  })
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, ignoreInit = TRUE)
 }
